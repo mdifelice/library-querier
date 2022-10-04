@@ -1,3 +1,29 @@
+import hashlib
+
+def query( a ):
+	__message( __get_article_index( { 'doi': 'lalal' } ) )
+
+def __message( message, verbose = False ):
+	if not verbose or args['verbose']:
+		print( message + "\n" )
+
+args = {
+	'verbose' : False
+}
+
+def __get_article_index( article ):
+	if article['doi']:
+		hash_seed = article['doi']
+	else:
+		hash_seed = article['title'] + article['authors'][0] + article['year']
+
+	return hashlib.md5( hash_seed.encode( 'utf-8' ) ).hexdigest()
+
+def __parse_arg_settings( settings ):
+	#@todo
+
+query( "hola" )
+		
 """
 #!/usr/bin/php
 <?php
@@ -11,17 +37,6 @@ define( "DOI", 4 );
 define( "SEARCH_TERMS", 5 );
 define( "RANK", 6 );
 define( "DATE", 7 );
-
-function message( $message, $verbose = false ) {
-    global $args;
-
-    if (
-        ! $verbose
-        || $args["verbose"]
-    ) {
-        print( $message . PHP_EOL );
-    }
-}
 
 function get_article_index( $article ) {
     if ( ! empty( $article[DOI] ) ) {
@@ -641,4 +656,4 @@ try {
     message( $e->getMessage() . " (use the --help argument)" );
 
     return 1;
-}
+"""
