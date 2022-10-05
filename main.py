@@ -1,28 +1,124 @@
 import hashlib
+import os.path
+import tempfile
+import time
+import urllib
 
 def query( a ):
 	__message( __get_article_index( { 'doi': 'lalal' } ) )
 
-def __message( message, verbose = False ):
-	if not verbose or args['verbose']:
-		print( message + "\n" )
+def __md5( string ):
+	return hashlib.md5( string.encode( 'utf-8' ) ).hexdigest()
 
-args = {
-	'verbose' : False
-}
+def __message( message, verbose = False ):
+	if (
+		not verbose
+		or __args.get( 'verbose' )
+	):
+		print( message )
 
 def __get_article_index( article ):
-	if article['doi']:
-		hash_seed = article['doi']
+	doi = article.get( 'doi' )
+
+	if doi:
+		hash_seed = doi
 	else:
-		hash_seed = article['title'] + article['authors'][0] + article['year']
+		hash_seed = article.get( 'title' ) + article( 'authors' )[0] + article( 'year' )
 
-	return hashlib.md5( hash_seed.encode( 'utf-8' ) ).hexdigest()
+	return __md5( hash_seed )
 
-def __parse_arg_settings( settings ):
-	#@todo
+def __start_progress( title, total ):
+	global __progress_total, __progress_title, __progress
 
-query( "hola" )
+	__progress_total = total
+	__progress_title = title
+	__progress       = 0
+
+	__print_progress()
+
+def __print_progress( newline = False ):
+	global __progress_total, __progress_title, __progress
+
+	print( '%s [%.2f%%]' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0 ), end='\r' if not newline else '\n' )
+
+def __update_progress():
+	global __progress
+
+	__progress += 1
+
+	__print_progress()
+
+def __finish_progress():
+	__progress = __progress_total
+
+	__print_progress( newline=True )
+
+def __file_get_contents( filename ):
+	contents = None
+
+	with open( filename ) as f:
+		contents = f.read()
+	
+	return contents
+
+def __request_url( url ):
+	cache_file = tempfile.gettempdir() + '/library-querier' + __md5( url ) + '.tmp'
+	response = None
+
+	if (
+		__args.get( 'use_cache' )
+		and path.exists( cache_file )
+		and path.getmtime( cache_file ) > time.time()
+	):
+		response = __file_get_contents( cache_file )
+
+	if response is None:
+		attempts = 0
+		max_attempts = __args.get( 'max_attempts' )
+
+		while attempts < max_attempts:
+			message( 'URL' + ( '(' + ( attempts + 1 ) + '/' + max_attempts + ')' if attempts > 0 else '' ) + ': ' + url, verbose=True )
+
+			try:
+				f = urllib.open( url )
+
+				response = f.read()
+
+				with open( cache_file ) as f:
+					f.write( response )
+
+				break
+			except:
+				time.sleep( 1 )
+
+				attempts += 1
+	else:
+		__message( 'Retrieving from cache for URL: ' + url, verbose=True )
+		
+	if (
+		response is None
+		and not __args.get( 'ignore_failed_calls' )
+	):
+		raise Exception( 'Error calling URL ' + url )
+
+	return response
+
+__args = {}
+__progress = 0
+__progress_title = None
+__progress_total = 0
+
+total = 7
+
+__start_progress( "test", total )
+
+for i in range( total ):
+	time.sleep( 1 )
+
+	__update_progress()
+
+__finish_progress()
+
 		
 """
 #!/usr/bin/php
