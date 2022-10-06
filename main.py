@@ -1,11 +1,59 @@
+import csv
+import datetime
 import hashlib
 import os.path
 import tempfile
 import time
 import urllib
 
-def query( a ):
-	__message( __get_article_index( { 'doi': 'lalal' } ) )
+def main( search_terms, output, start_year = 1900, end_year = datetime.date.today().year, max_attempts = 3, ignore_failed_calls = False, use_cache = False, selected_apis = [], debug = False  ):
+	articles = {}
+
+	if ( path.exists( output ) ):
+		with open( output ) as f:
+			reader = csv.reader( f )
+
+			for row in reader:
+				article = {
+					'title'  : row[0],
+					'source' : row[1].split( ',' )
+				}
+
+				id = __get_article_index( article )
+
+				articles[ id ] = article
+	
+	old_articles         = articles.len()
+	added_articles       = 0
+	articles_updated_map = {}
+
+	for search_term in search_terms:
+		for api, settings in apis:
+			if (
+				not selected_apis
+				or api in selected_apis
+			):
+				message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...' )
+
+				processed_articles = 0
+				total_articles     = None
+
+				while (
+					total_articles is not None
+					and processed_articles < total_articles
+				):
+					pass
+
+				if total_articles is not None:
+					__finish_progress()
+
+	with open( output, 'w' ) as f:
+		writer = csv.writer( f )
+
+		for id in articles:
+			article = articles[ id ]
+
+			writer.writerow( article )
 
 def __md5( string ):
 	return hashlib.md5( string.encode( 'utf-8' ) ).hexdigest()
@@ -39,7 +87,7 @@ def __start_progress( title, total ):
 def __print_progress( newline = False ):
 	global __progress_total, __progress_title, __progress
 
-	print( '%s [%.2f%%]' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0 ), end='\r' if not newline else '\n' )
+	print( '%s [%.2f%%]' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0 ), end = '\r' if not newline else '\n' )
 
 def __update_progress():
 	global __progress
@@ -49,9 +97,11 @@ def __update_progress():
 	__print_progress()
 
 def __finish_progress():
+	global __progress_total, __progress
+
 	__progress = __progress_total
 
-	__print_progress( newline=True )
+	__print_progress( newline = True )
 
 def __file_get_contents( filename ):
 	contents = None
@@ -61,12 +111,12 @@ def __file_get_contents( filename ):
 	
 	return contents
 
-def __request_url( url ):
+def __request_url( url, use_cache, ignore_failed_calls, max_attemps ):
 	cache_file = tempfile.gettempdir() + '/library-querier' + __md5( url ) + '.tmp'
 	response = None
 
 	if (
-		__args.get( 'use_cache' )
+		use_cache
 		and path.exists( cache_file )
 		and path.getmtime( cache_file ) > time.time()
 	):
@@ -74,10 +124,9 @@ def __request_url( url ):
 
 	if response is None:
 		attempts = 0
-		max_attempts = __args.get( 'max_attempts' )
 
 		while attempts < max_attempts:
-			message( 'URL' + ( '(' + ( attempts + 1 ) + '/' + max_attempts + ')' if attempts > 0 else '' ) + ': ' + url, verbose=True )
+			message( 'URL' + ( '(' + ( attempts + 1 ) + '/' + max_attempts + ')' if attempts > 0 else '' ) + ': ' + url, verbose = True )
 
 			try:
 				f = urllib.open( url )
@@ -93,33 +142,28 @@ def __request_url( url ):
 
 				attempts += 1
 	else:
-		__message( 'Retrieving from cache for URL: ' + url, verbose=True )
+		__message( 'Retrieving from cache for URL: ' + url, verbose = True )
 		
 	if (
 		response is None
-		and not __args.get( 'ignore_failed_calls' )
+		and not ignore_failed_calls
 	):
 		raise Exception( 'Error calling URL ' + url )
 
 	return response
 
 __args = {}
-__progress = 0
-__progress_title = None
-__progress_total = 0
-
 total = 7
-
-__start_progress( "test", total )
+__start_progress( 'title', total )
 
 for i in range( total ):
 	time.sleep( 1 )
-
 	__update_progress()
 
 __finish_progress()
 
-		
+
+
 """
 #!/usr/bin/php
 <?php
