@@ -1,7 +1,9 @@
 import csv
 import datetime
 import hashlib
+import json
 import os.path
+import re
 import tempfile
 import time
 import urllib
@@ -19,33 +21,215 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 					'source' : row[1].split( ',' )
 				}
 
-				id = __get_article_index( article )
+				article_id = __get_article_index( article )
 
-				articles[ id ] = article
+				articles[ article_id ] = article
 	
 	old_articles         = articles.len()
 	added_articles       = 0
-	articles_updated_map = {}
+	updated_articles_map = {}
 
-	for search_term in search_terms:
-		for api, settings in apis:
-			if (
-				not selected_apis
-				or api in selected_apis
+	def ieeexplore_parse_articles( response ):
+		articles = []
+
+		if articles in response:
+			for raw_article in response.articles:
+				article = {
+					'title'   : raw_article.title,
+					'authors' : raw_article.authors.authors.map( lambda author : author.full_name ),
+					'year'    : raw_article.publication_year,
+					'doi'     : __parse_doi( raw_article.doi )
+				}
+
+				articles.append( article )
+
+		return articles
+
+	def pubmed_parse_articles( response ):
+		articles = []
+
+		summary_response = __request_url( 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=' + urllib.quote( response.esearchresult.idlist.join( ',' ) ) + '&retmode=json' )
+
+		if summary_response:
+			decoded_summary_response = json.loads( summary_response )
+
+			if decoded_summary_response:
+				if result in decoded_summary_response:
+					for id in decoded_summary_response.result:
+						if id in result:
+							raw_article = result.id
+							doi         = None
+
+							if articleids in raw_article:
+								for article_id in raw_article.articleids:
+									if article_id.idtype == 'doi':
+										doi = article_id.value
+
+										break
+
+							article = {
+								'title'   : raw_article.title,
+								'authors' : raw_article.authors.map( lambda author : author.name ),
+								'year'    : datetime.datetime.strptime( raw_article.sortpubdate, '%Y' ),
+								'doi'     : __parse_doi( doi )
+							}
+
+							articles.append( article )
+
+		return articles
+
+	def scopus_parse_articles( response ):
+		articles = []
+
+		if entry in response['search-results'].entry:
+			for entry in response['search-results'].entry:
+				if error not in entry:
+					article = {
+						'title'   : entry['dc:title'],
+						'authors' : entry['dc:creators'],
+						'year'    : datetime.datetime.strptime( entry['prism:coverDate'], '%Y' ),
+						'doi'     : __parse_doi( entry['prism:doi'] )
+					}
+
+					articles.append( article )
+
+
+		return articles
+
+	apis = {
+# @link https://developer.ieee.org/docs/read/Searching_the_IEEE_Xplore_Metadata_API
+		'IEEEXplore' : {
+			'parse_articles' : ieeexplore_parse_articles,
+			'parse_total'    : lambda response : response.total_records,
+			'request_mask'   : 'http://ieeexploreapi.ieee.org/api/v1/search/articles?apikey={api_key}&format=json&max_records={count}&start_record={start}&index_terms={search_terms}&start_year={start_year}&end_year={end_year}'
+		},
+# @link https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
+		'PubMed' : {
+			'parse_arguments' : {
+				'search_terms' : lambda value : re.sub( '"[^"]+"', '$0[All Fields]', value )
+			},
+			'parse_articles' : pubmed_parse_articles,
+			'parse_total'    : lambda response : response.esearchresult.count,
+			'request_mask'   : 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retstart={start}&retmax={count}&retmode=json&term={search_terms}&mindate={start_year}&maxdate={end_year}'
+		},
+# @link https://dev.elsevier.com/documentation/ScopusSearchAPI.wadl
+		'Scopus' : {
+			'parse_arguments' : {
+				'end_year' : lambda value, arguments : '-' + value if start_year in arguments else value
+			},
+			'parse_articles' : scopus_parse_articles,
+			'parse_total'    : lambda response : response['search-results']['opensearch:totalResults'],
+			'request_mask'   : 'https://api.elsevier.com/content/search/scopus?apiKey={api_key}&httpAccept=application/json&count={count}&start={start}&query=KEY%%28{search_terms}%%29&date={start_year}{end_year}'
+		}
+	}
+
+	for api, settings in apis:
+		if (
+			not selected_apis
+			or api in selected_apis
+		):
+			__message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...', debug )
+
+			processed_articles = 0
+			total_articles     = None
+
+			while (
+				total_articles is not None
+				and processed_articles < total_articles
 			):
-				message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...' )
+				placeholders = {
+					'count'        : 25,
+					'search_terms' : search_terms,
+					'start'        : processed_articles
+				}
 
-				processed_articles = 0
-				total_articles     = None
+				def request_parser():
+					argument = matches[1]
+					value    = ''
 
-				while (
-					total_articles is not None
-					and processed_articles < total_articles
-				):
-					pass
+					if argument in placeholders:
+						value = placeholders.get( argument )
+
+						arguments_parser = settings.get( 'parse_arguments' )
+
+						if argument in arguments_parser:
+							value = arguments_parser( value, placeholders )
+
+					return urllib.quote( value )
+
+				request = re.sub(
+					'{([^}]+)}',
+					request_parser,
+					settings.get( 'request_mask' )
+				)
+
+				response = __request_url( request, use_cache, ignore_failed_calls, max_attempts, debug )
+
+				if response:
+					decoded_response = json.loads( response )
+
+					if decoded_response:
+						if total_articles is None:
+							total_articles = settings.get( 'parse_total' )( decoded_response )
+
+							__message( 'Total articles: ' + total_articles, debug )
+
+							__start_progress( 'Receiving articles...', total_articles )
+						
+						page_articles = settings.get( 'parse_articles' )( decoded_response )
+
+						for page_article in page_articles:
+							__update_progress()
+
+							processed_articles += 1
+
+							article_id = __get_article_index( page_article )
+
+							if article_id not in articles:
+								article = {
+									'title'        : page_article.title,
+									'source'       : [],
+									'authors'      : page_article.authors,
+									'year'         : page_article.year,
+									'doi'          : page_article.doi,
+									'search_terms' : [],
+									'rank'         : [],
+									'date'         : [],
+								}
+
+								added_articles += 1
+							else:
+								article = articles.get( article_id )
+
+								updated_articles_map[ article_id ] = True
+
+							source_index = -1
+
+							for maybe_source_index, article_source in article.get( 'source' ):
+								if (
+									article_source == source
+									and article.get( 'search_terms' )[ maybe_source_index ] == search_terms
+							    ):
+									source_index = maybe_source_index
+								
+
+							rank = processed_articles
+							date = datetime.date.today().strftime( '%Y-%m-%d %H:%M:%S' )
+							if source_index == -1:
+								article.source.append( source )
+								article.search_terms.append( search_terms )
+								article.rank.append( rank )
+								article.date.append( date )
+							else:
+								article.rank[ source_index ] = rank
+								article.date[ source_index ] = date
+
+							articles[ article_id ] = article
 
 				if total_articles is not None:
 					__finish_progress()
+
+	total_articles_by_provider = {}
 
 	with open( output, 'w' ) as f:
 		writer = csv.writer( f )
@@ -53,16 +237,31 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 		for id in articles:
 			article = articles[ id ]
 
-			writer.writerow( article )
+			writer.writerow(
+				map(
+					lambda value : value.join( ',' ) if isinstance( value, list ) else value,
+					article
+			   )
+			)
+
+			sources = set( article.get( 'source' ) )
+
+			for source in sources:
+				if source not in total_articles_by_provider:
+					total_articles_by_provider[ source ] = 0
+
+				total_articles_by_provider[ source ] += 1
+	
+		message( 'Added articles: ' + added_articles + '\nUpdated articles: ' + updated_articles_map.len() + '\nTotal articles: ' + old_articles + added_articles + ( ' (' + total_articles_by_provider.keys().map( lambda key : key + ': ' + total_articles_by_provider.get( key ) ).join( ', ' ) + ')' if total_articles_by_provider else '' ) )
+
+def __parse_doi( doi ):
+	return 'https://doi.org/' + doi if doi else ''
 
 def __md5( string ):
 	return hashlib.md5( string.encode( 'utf-8' ) ).hexdigest()
 
-def __message( message, verbose = False ):
-	if (
-		not verbose
-		or __args.get( 'verbose' )
-	):
+def __message( message, debug ):
+	if ( debug ):
 		print( message )
 
 def __get_article_index( article ):
@@ -111,7 +310,7 @@ def __file_get_contents( filename ):
 	
 	return contents
 
-def __request_url( url, use_cache, ignore_failed_calls, max_attemps ):
+def __request_url( url, use_cache, ignore_failed_calls, max_attemps, debug ):
 	cache_file = tempfile.gettempdir() + '/library-querier' + __md5( url ) + '.tmp'
 	response = None
 
@@ -126,7 +325,7 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attemps ):
 		attempts = 0
 
 		while attempts < max_attempts:
-			message( 'URL' + ( '(' + ( attempts + 1 ) + '/' + max_attempts + ')' if attempts > 0 else '' ) + ': ' + url, verbose = True )
+			message( 'URL' + ( '(' + ( attempts + 1 ) + '/' + max_attempts + ')' if attempts > 0 else '' ) + ': ' + url, debug )
 
 			try:
 				f = urllib.open( url )
@@ -142,7 +341,7 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attemps ):
 
 				attempts += 1
 	else:
-		__message( 'Retrieving from cache for URL: ' + url, verbose = True )
+		__message( 'Retrieving from cache for URL: ' + url, debug )
 		
 	if (
 		response is None
@@ -151,18 +350,6 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attemps ):
 		raise Exception( 'Error calling URL ' + url )
 
 	return response
-
-__args = {}
-total = 7
-__start_progress( 'title', total )
-
-for i in range( total ):
-	time.sleep( 1 )
-	__update_progress()
-
-__finish_progress()
-
-
 
 """
 #!/usr/bin/php
