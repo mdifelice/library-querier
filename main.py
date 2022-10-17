@@ -1,3 +1,4 @@
+import ast
 import csv
 import datetime
 import hashlib
@@ -17,15 +18,24 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 			reader = csv.reader( f )
 
 			for row in reader:
-				article = {
-					'title'  : row[0],
-					'source' : row[1].split( ',' )
-				}
+				try:
+					article = {
+						'title'        : row[0],
+						'source'       : ast.literal_eval( row[1] ) if ( row[1] ) else [],
+						'authors'      : ast.literal_eval( row[2] ) if ( row[2] ) else [],
+						'year'         : row[3],
+						'doi'          : row[4],
+						'search_terms' : ast.literal_eval( row[5] ) if ( row[5] ) else [],
+						'rank'         : ast.literal_eval( row[6] ) if ( row[6] ) else [],
+						'date'         : ast.literal_eval( row[7] ) if ( row[7] ) else []
+					}
 
-				article_id = __get_article_index( article )
+					article_id = __get_article_index( article )
 
-				articles[ article_id ] = article
-	
+					articles[ article_id ] = article
+				except Exception as e:
+					__message( 'Invalid data on input file: ' + str( e ), debug )
+
 	old_articles         = len( articles )
 	added_articles       = 0
 	updated_articles_map = {}
@@ -130,7 +140,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 # @link https://dev.elsevier.com/documentation/ScopusSearchAPI.wadl
 		'scopus' : {
 			'parse_arguments' : {
-				'end_year' : lambda value, arguments : '-' + value if start_year in arguments else value
+				'end_year' : lambda value, arguments : '-' + str( value ) if 'start_year' in arguments else str( value )
 			},
 			'parse_articles' : scopus_parse_articles,
 			'parse_total'    : lambda response : response['search-results']['opensearch:totalResults'],
@@ -145,7 +155,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 			not selected_apis
 			or api in selected_apis
 		):
-			__message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...', debug )
+			__message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...', True )
 
 			processed_articles = 0
 			total_articles     = None
@@ -157,8 +167,10 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 				placeholders = {
 					'api_key'      : api_keys[ api ] if api in api_keys else '',
 					'count'        : 25,
+					'end_year'     : end_year,
 					'search_terms' : search_terms,
-					'start'        : processed_articles
+					'start'        : processed_articles,
+					'start_year'   : start_year
 				}
 
 				def request_parser( matches ):
@@ -203,6 +215,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 							__update_progress()
 
 							processed_articles += 1
+							updated_article    = None
 
 							article_id = __get_article_index( page_article )
 
@@ -222,7 +235,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 							else:
 								article = articles.get( article_id )
 
-								updated_articles_map[ article_id ] = True
+								updated_article = article_id
 
 							source_index = -1
 
@@ -241,8 +254,9 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 									maybe_source_index += 1
 								
 
-							rank = processed_articles
-							date = datetime.date.today().strftime( '%Y-%m-%d %H:%M:%S' )
+							rank             = processed_articles
+							date             = datetime.datetime.now().strftime( '%Y-%m-%d' )
+							article_modified = False
 
 							if source_index == -1:
 								article_source       = article.get( 'source' )
@@ -261,22 +275,34 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 									'rank' 		   : article_rank,
 									'date' 		   : article_date
 								} )
+
+								article_modified = True
 							else:
 								article_rank = article.get( 'rank' )
 								article_date = article.get( 'date' )
 
-								article_rank[ source_index ] = rank
-								article_date[ source_index ] = date
+								if (
+									article_rank[ source_index ] != rank
+									or article_date[ source_index ] != date
+							    ):
+									article_rank[ source_index ] = rank
+									article_date[ source_index ] = date
 
-								article.update( {
-									'rank' : article_rank,
-									'date' : article_date
-								} )
+									article.update( {
+										'rank' : article_rank,
+										'date' : article_date
+									} )
 
-							articles[ article_id ] = article
+									article_modified = True
 
-				if total_articles is not None:
-					__finish_progress()
+							if article_modified:
+								articles[ article_id ] = article
+
+								if updated_article:
+									updated_articles_map[ article_id ] = True
+
+			if total_articles is not None:
+				__finish_progress()
 
 	total_articles_by_provider = {}
 
@@ -284,7 +310,8 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 		if ( len( articles ) ):
 			writer = csv.DictWriter( f, fieldnames = list( next( iter( articles.values() ) ).keys() ) )
 
-			writer.writerows( list( articles.values() ) )
+			print(list( next( iter( articles.values() ) ).keys() ) )
+			writer.writerows( articles.values() )
 
 			for id in articles:
 				article = articles.get( id )
@@ -297,7 +324,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 
 					total_articles_by_provider[ source ] += 1
 	
-		__message( 'Added articles: ' + str( added_articles ) + '\nUpdated articles: ' + str( len( updated_articles_map ) ) + '\nTotal articles: ' + str( old_articles + added_articles ) + ( ' (' + ', '.join( map( lambda key : key + ': ' + str( total_articles_by_provider.get( key ) ), total_articles_by_provider.keys() ) ) + ')' if total_articles_by_provider else '' ), debug )
+		__message( 'Added articles: ' + str( added_articles ) + '\nUpdated articles: ' + str( len( updated_articles_map ) ) + '\nTotal articles: ' + str( old_articles + added_articles ) + ( ' (' + ', '.join( map( lambda key : key + ': ' + str( total_articles_by_provider.get( key ) ), total_articles_by_provider.keys() ) ) + ')' if total_articles_by_provider else '' ), True )
 
 def __parse_doi( doi ):
 	return 'https://doi.org/' + doi if doi else ''
@@ -403,4 +430,4 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attempts, debug ):
 
 	return response
 
-main( "depression diagnosis artificial intelligence", "test.csv", debug = True, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True )
+main( "depression diagnosis artificial intelligence", "test.csv", debug = False, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017 )
