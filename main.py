@@ -121,11 +121,29 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 
 		return articles
 
+	def eric_parse_articles( response, use_cache, ignore_failed_calls, max_attempts, debug ):
+		articles = []
+
+		response = response.get( 'response' )
+
+		if response:
+			for doc in response.get( 'docs' ):
+				article = {
+					'title'   : doc.get( 'title' ),
+					'authors' : doc.get( 'authors' ),
+					'year'    : doc.get( 'publicationyear' ),
+					'doi'     : doc.get( 'url' )
+				}
+
+				articles.append( article )
+
+		return articles
+
 	apis = {
 # @link https://developer.ieee.org/docs/read/Searching_the_IEEE_Xplore_Metadata_API
 		'ieeexplore' : {
 			'parse_articles' : ieeexplore_parse_articles,
-			'parse_total'    : lambda response : response.get( 'total_records' ),
+			'parse_total'    : lambda response : response.get( 'total_records' ) if 'total_records' in response else 0,
 			'request_mask'   : 'http://ieeexploreapi.ieee.org/api/v1/search/articles?apikey={api_key}&format=json&max_records={count}&start_record={start}&index_terms={search_terms}&start_year={start_year}&end_year={end_year}'
 		},
 # @link https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
@@ -134,7 +152,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 				'search_terms' : lambda value, arguments : re.sub( '"[^"]+"', '$0[All Fields]', value )
 			},
 			'parse_articles' : pubmed_parse_articles,
-			'parse_total'    : lambda response : response.get( 'esearchresult' ).get( 'count' ),
+			'parse_total'    : lambda response : response.get( 'esearchresult' ).get( 'count' ) if 'esearchresult' in response and 'count' in response.get( 'esearchresult' ) else 0,
 			'request_mask'   : 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retstart={start}&retmax={count}&retmode=json&term={search_terms}&mindate={start_year}&maxdate={end_year}'
 		},
 # @link https://dev.elsevier.com/documentation/ScopusSearchAPI.wadl
@@ -143,9 +161,22 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 				'end_year' : lambda value, arguments : '-' + str( value ) if 'start_year' in arguments else str( value )
 			},
 			'parse_articles' : scopus_parse_articles,
-			'parse_total'    : lambda response : response['search-results']['opensearch:totalResults'],
+			'parse_total'    : lambda response : response.get( 'search-results' ).get( 'opensearch:totalResults' ) if 'search-results' in response and 'opensearch:totalResults' in response.get( 'search-results' ) else 0,
 			'request_mask'   : 'https://api.elsevier.com/content/search/scopus?apiKey={api_key}&httpAccept=application/json&count={count}&start={start}&query=KEY%28{search_terms}%29&date={start_year}{end_year}'
-		}
+		},
+# @todo fix @link https://eric.ed.gov/?api#/default/get_eric_
+# No date filters
+		'eric' : {
+			'parse_arguments' : {
+				'search_terms' : lambda value, arguments : ' AND '.join( map( lambda value : "description:" + value, value.split( '" "' ) ) ),
+			},
+			'parse_articles' : eric_parse_articles,
+			'parse_total'    : lambda response : response.get( 'response' ).get( 'numFound' ) if 'response' in response and numFound in response.get( 'response' ) else 0,
+			'request_mask'   : 'https://api.ies.ed.gov/eric/?search={search_terms}%20pubyearmin:{start_year}%20pubyearmax:{end_year}&format=json&rows={count}&start={start}&fields=title,authors,publicationyear,url'
+		},
+# @todo @link https://doaj.org/api/docs
+		'doaj' : {
+		},
 	}
 
 	for api in apis:
@@ -220,86 +251,95 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 							article_id = __get_article_index( page_article )
 
 							if article_id not in articles:
-								article = {
-									'title'        : page_article.get( 'title' ),
-									'source'       : [],
-									'authors'      : page_article.get( 'authors' ),
-									'year'         : page_article.get( 'year' ),
-									'doi'          : page_article.get( 'doi' ),
-									'search_terms' : [],
-									'rank'         : [],
-									'date'         : [],
-								}
+								year = page_article.get( 'year' )
 
-								added_articles += 1
+								if (
+									year >= start_year
+									and year <= end_year
+								):
+									article = {
+										'title'        : page_article.get( 'title' ),
+										'source'       : [],
+										'authors'      : page_article.get( 'authors' ),
+										'year'         : year,
+										'doi'          : page_article.get( 'doi' ),
+										'search_terms' : [],
+										'rank'         : [],
+										'date'         : [],
+									}
+
+									added_articles += 1
+								else:
+									article = None
 							else:
 								article = articles.get( article_id )
 
 								updated_article = article_id
 
-							source_index = -1
+							if article:
+								source_index = -1
 
-							source = article.get( 'source' )
+								source = article.get( 'source' )
 
-							if source:
-								maybe_source_index = 0
+								if source:
+									maybe_source_index = 0
 
-								for article_source in source:
-									if (
-										article_source == api
-										and article.get( 'search_terms' )[ maybe_source_index ] == search_terms
-									):
-										source_index = maybe_source_index
+									for article_source in source:
+										if (
+											article_source == api
+											and article.get( 'search_terms' )[ maybe_source_index ] == search_terms
+										):
+											source_index = maybe_source_index
 
-									maybe_source_index += 1
-								
+										maybe_source_index += 1
+									
 
-							rank             = processed_articles
-							date             = datetime.datetime.now().strftime( '%Y-%m-%d' )
-							article_modified = False
+								rank             = processed_articles
+								date             = datetime.datetime.now().strftime( '%Y-%m-%d' )
+								article_modified = False
 
-							if source_index == -1:
-								article_source       = article.get( 'source' )
-								article_search_terms = article.get( 'search_terms' )
-								article_rank         = article.get( 'rank' )
-								article_date         = article.get( 'date' )
+								if source_index == -1:
+									article_source       = article.get( 'source' )
+									article_search_terms = article.get( 'search_terms' )
+									article_rank         = article.get( 'rank' )
+									article_date         = article.get( 'date' )
 
-								article_source.append( api )
-								article_search_terms.append( search_terms )
-								article_rank.append( rank )
-								article_date.append( date )
-
-								article.update( {
-									'source' 	   : article_source,
-									'search_terms' : article_search_terms,
-									'rank' 		   : article_rank,
-									'date' 		   : article_date
-								} )
-
-								article_modified = True
-							else:
-								article_rank = article.get( 'rank' )
-								article_date = article.get( 'date' )
-
-								if (
-									article_rank[ source_index ] != rank
-									or article_date[ source_index ] != date
-							    ):
-									article_rank[ source_index ] = rank
-									article_date[ source_index ] = date
+									article_source.append( api )
+									article_search_terms.append( search_terms )
+									article_rank.append( rank )
+									article_date.append( date )
 
 									article.update( {
-										'rank' : article_rank,
-										'date' : article_date
+										'source' 	   : article_source,
+										'search_terms' : article_search_terms,
+										'rank' 		   : article_rank,
+										'date' 		   : article_date
 									} )
 
 									article_modified = True
+								else:
+									article_rank = article.get( 'rank' )
+									article_date = article.get( 'date' )
 
-							if article_modified:
-								articles[ article_id ] = article
+									if (
+										article_rank[ source_index ] != rank
+										or article_date[ source_index ] != date
+									):
+										article_rank[ source_index ] = rank
+										article_date[ source_index ] = date
 
-								if updated_article:
-									updated_articles_map[ article_id ] = True
+										article.update( {
+											'rank' : article_rank,
+											'date' : article_date
+										} )
+
+										article_modified = True
+
+								if article_modified:
+									articles[ article_id ] = article
+
+									if updated_article:
+										updated_articles_map[ article_id ] = True
 
 			if total_articles is not None:
 				__finish_progress()
@@ -430,4 +470,4 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attempts, debug ):
 
 	return response
 
-main( "depression diagnosis artificial intelligence", "test.csv", debug = False, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017 )
+main( '"depression diagnosis" "artificial intelligence"', "test-eric.csv", debug = False, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017, selected_apis = 'eric' )
