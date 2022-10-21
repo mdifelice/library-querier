@@ -6,7 +6,6 @@ import json
 import math
 import os.path as path
 import re
-import sys
 import tempfile
 import time
 import urllib.parse as parse
@@ -457,7 +456,7 @@ def __start_progress( title, total ):
 def __print_progress( newline = False ):
 	global __progress_total, __progress_title, __progress
 
-	sys.stdout.write( '%s [%.2f%%]%s' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0, '\r' if not newline else '\n' ) )
+	print( '\r%s [%.2f%%]' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0 ), end = '\n' if newline else '' )
 
 def __update_progress():
 	global __progress
@@ -474,7 +473,7 @@ def __finish_progress():
 
 	__progress = __progress_total
 
-	__print_progress( newline = True )
+	__print_progress( True )
 
 def __file_get_contents( filename ):
 	contents = None
