@@ -46,21 +46,22 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 
 		raw_articles = response.get( 'articles' )
 
-		for raw_article in raw_articles:
-			authors_container = raw_article.get( 'authors' )
+		if raw_articles:
+			for raw_article in raw_articles:
+				authors_container = raw_article.get( 'authors' )
 
-			if authors_container:
-				authors = authors_container.get( 'authors' )
+				if authors_container:
+					authors = authors_container.get( 'authors' )
 
-			if not authors:
-				authors = []
+				if not authors:
+					authors = []
 
-			articles.append( {
-				'title'   : raw_article.get( 'title' ),
-				'authors' : list( map( lambda author : author.get( 'full_name' ), authors ) ),
-				'year'    : int( raw_article.get( 'publication_year' ) ),
-				'doi'     : __parse_doi( raw_article.get( 'doi' ) )
-			} )
+				articles.append( {
+					'title'   : raw_article.get( 'title' ),
+					'authors' : list( map( lambda author : author.get( 'full_name' ), authors ) ),
+					'year'    : int( raw_article.get( 'publication_year' ) ),
+					'doi'     : __parse_doi( raw_article.get( 'doi' ) )
+				} )
 
 		return articles
 
@@ -68,38 +69,40 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 		articles = []
 
 		searchresult = response.get( 'esearchresult' )
-		idlist       = searchresult.get( 'idlist' ) if 'idlist' in searchresult else ''
 
-		summary_response = __request_url( 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=' + parse.quote( ','.join( idlist ) ) + '&retmode=json', use_cache, ignore_failed_calls, max_attempts, debug )
+		if searchresult:
+			idlist       = searchresult.get( 'idlist' ) if 'idlist' in searchresult else ''
 
-		if summary_response:
-			decoded_summary_response = json.loads( summary_response )
+			summary_response = __request_url( 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=' + parse.quote( ','.join( idlist ) ) + '&retmode=json', use_cache, ignore_failed_calls, max_attempts, debug )
 
-			if (
-				decoded_summary_response
-				and 'result' in decoded_summary_response
-			):
-				result = decoded_summary_response.get( 'result' )
+			if summary_response:
+				decoded_summary_response = json.loads( summary_response )
 
-				for id in result.get( 'uids' ):
-					raw_article = result.get( id )
-					doi         = None
-					article_ids = raw_article.get( 'articleids' )
+				if (
+					decoded_summary_response
+					and 'result' in decoded_summary_response
+				):
+					result = decoded_summary_response.get( 'result' )
 
-					for article_id in article_ids:
-						if article_id.get( 'idtype' ) == 'doi':
-							doi = article_id.get( 'value' )
+					for id in result.get( 'uids' ):
+						raw_article = result.get( id )
+						doi         = None
+						article_ids = raw_article.get( 'articleids' )
 
-							break
+						for article_id in article_ids:
+							if article_id.get( 'idtype' ) == 'doi':
+								doi = article_id.get( 'value' )
+
+								break
  
-					article = {
-						'title'   : raw_article.get( 'title' ),
-						'authors' : list( map( lambda author : author.get( 'name' ), raw_article.get( 'authors' ) ) ),
-						'year'    : int( datetime.datetime.strptime( raw_article.get( 'sortpubdate' ), '%Y/%m/%d %H:%M' ) ),
-						'doi'     : __parse_doi( doi )
-					}
+						article = {
+							'title'   : raw_article.get( 'title' ),
+							'authors' : list( map( lambda author : author.get( 'name' ), raw_article.get( 'authors' ) ) ),
+							'year'    : datetime.datetime.strptime( raw_article.get( 'sortpubdate' ), '%Y/%m/%d %H:%M' ).year,
+							'doi'     : __parse_doi( doi )
+						}
 
-					articles.append( article )
+						articles.append( article )
 
 		return articles
 
@@ -114,7 +117,7 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 					article = {
 						'title'   : entry.get( 'dc:title' ),
 						'authors' : entry.get( 'dc:creators' ),
-						'year'    : int( datetime.datetime.strptime( entry.get( 'prism:coverDate' ), '%Y-%m-%d' ) ),
+						'year'    : datetime.datetime.strptime( entry.get( 'prism:coverDate' ), '%Y-%m-%d' ).year,
 						'doi'     : __parse_doi( entry.get( 'prism:doi' ) )
 					}
 
