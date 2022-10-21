@@ -3,6 +3,7 @@ import csv
 import datetime
 import hashlib
 import json
+import math
 import os.path as path
 import re
 import tempfile
@@ -23,7 +24,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 						'title'        : row[0],
 						'source'       : ast.literal_eval( row[1] ) if ( row[1] ) else [],
 						'authors'      : ast.literal_eval( row[2] ) if ( row[2] ) else [],
-						'year'         : row[3],
+						'year'         : int( row[3] ),
 						'doi'          : row[4],
 						'search_terms' : ast.literal_eval( row[5] ) if ( row[5] ) else [],
 						'rank'         : ast.literal_eval( row[6] ) if ( row[6] ) else [],
@@ -57,7 +58,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 			articles.append( {
 				'title'   : raw_article.get( 'title' ),
 				'authors' : list( map( lambda author : author.get( 'full_name' ), authors ) ),
-				'year'    : raw_article.get( 'publication_year' ),
+				'year'    : int( raw_article.get( 'publication_year' ) ),
 				'doi'     : __parse_doi( raw_article.get( 'doi' ) )
 			} )
 
@@ -94,7 +95,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 					article = {
 						'title'   : raw_article.get( 'title' ),
 						'authors' : list( map( lambda author : author.get( 'name' ), raw_article.get( 'authors' ) ) ),
-						'year'    : datetime.datetime.strptime( raw_article.get( 'sortpubdate' ), '%Y/%m/%d %H:%M' ),
+						'year'    : int( datetime.datetime.strptime( raw_article.get( 'sortpubdate' ), '%Y/%m/%d %H:%M' ) ),
 						'doi'     : __parse_doi( doi )
 					}
 
@@ -113,7 +114,7 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 					article = {
 						'title'   : entry.get( 'dc:title' ),
 						'authors' : entry.get( 'dc:creators' ),
-						'year'    : datetime.datetime.strptime( entry.get( 'prism:coverDate' ), '%Y-%m-%d' ),
+						'year'    : int( datetime.datetime.strptime( entry.get( 'prism:coverDate' ), '%Y-%m-%d' ) ),
 						'doi'     : __parse_doi( entry.get( 'prism:doi' ) )
 					}
 
@@ -131,9 +132,49 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 				article = {
 					'title'   : doc.get( 'title' ),
 					'authors' : doc.get( 'authors' ),
-					'year'    : doc.get( 'publicationyear' ),
+					'year'    : int( doc.get( 'publicationyear' ) ),
 					'doi'     : doc.get( 'url' )
 				}
+
+				articles.append( article )
+
+		return articles
+
+	def doaj_parse_articles( response, use_cache, ignore_failed_calls, max_attempts, debug ):
+		articles = []
+
+		results = response.get( 'results' )
+
+		if results:
+			for result in results:
+				data = result.get( 'bibjson' )
+
+				if data:
+					doi         = None
+					authors     = []
+					identifiers = data.get( 'identifier' )
+					raw_authors = data.get( 'author' )
+
+					if identifiers:
+						for identifier in identifiers:
+							if 'DOI' == identifier.get( 'type' ):
+								doi = identifier.get( 'id' )
+
+								break
+
+					if raw_authors:
+						for raw_author in raw_authors:
+							name = raw_author.get( 'name' )
+
+							if name:
+								authors.append( name )
+
+					article = {
+						'title'   : data.get( 'title' ),
+						'authors' : authors,
+						'year'    : int( data.get( 'year' ) ),
+						'doi'     : __parse_doi( doi )
+					}
 
 				articles.append( article )
 
@@ -164,18 +205,21 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 			'parse_total'    : lambda response : response.get( 'search-results' ).get( 'opensearch:totalResults' ) if 'search-results' in response and 'opensearch:totalResults' in response.get( 'search-results' ) else 0,
 			'request_mask'   : 'https://api.elsevier.com/content/search/scopus?apiKey={api_key}&httpAccept=application/json&count={count}&start={start}&query=KEY%28{search_terms}%29&date={start_year}{end_year}'
 		},
-# @todo fix @link https://eric.ed.gov/?api#/default/get_eric_
+# @link https://eric.ed.gov/?api#/default/get_eric_
 # No date filters
 		'eric' : {
 			'parse_arguments' : {
-				'search_terms' : lambda value, arguments : ' AND '.join( map( lambda value : "description:" + value, value.split( '" "' ) ) ),
+				'search_terms' : lambda value, arguments : ' OR '.join( map( lambda field : '(' + ' AND '.join( map( lambda value : field + ':' + value, value.split( '" "' ) ) ) + ')', [ 'title', 'subject', 'description' ] ) ),
 			},
 			'parse_articles' : eric_parse_articles,
-			'parse_total'    : lambda response : response.get( 'response' ).get( 'numFound' ) if 'response' in response and numFound in response.get( 'response' ) else 0,
-			'request_mask'   : 'https://api.ies.ed.gov/eric/?search={search_terms}%20pubyearmin:{start_year}%20pubyearmax:{end_year}&format=json&rows={count}&start={start}&fields=title,authors,publicationyear,url'
+			'parse_total'    : lambda response : response.get( 'response' ).get( 'numFound' ) if 'response' in response and 'numFound' in response.get( 'response' ) else 0,
+			'request_mask'   : 'https://api.ies.ed.gov/eric/?search={search_terms}%20&format=json&rows={count}&start={start}&fields=title,author,publicationdateyear,url'
 		},
 # @todo @link https://doaj.org/api/docs
 		'doaj' : {
+			'parse_articles' : doaj_parse_articles,
+			'parse_total'    : lambda response : response.get( 'total' ) if 'total' in response else 0,
+			'request_mask'   : 'https://doaj.org/api/search/articles/{search_terms}?pageSize={count}&page={page}',
 		},
 	}
 
@@ -189,20 +233,25 @@ def main( search_terms, output, start_year = 1900, end_year = datetime.date.toda
 			__message( 'Calling API ' + api + ' for search terms: "' + search_terms + '"...', True )
 
 			processed_articles = 0
+			queried_articles   = 0
+			articles_per_page  = 25
 			total_articles     = None
 
 			while (
 				total_articles is None
-				or processed_articles < total_articles
+				or queried_articles < total_articles
 			):
 				placeholders = {
 					'api_key'      : api_keys[ api ] if api in api_keys else '',
-					'count'        : 25,
+					'count'        : articles_per_page,
 					'end_year'     : end_year,
+					'page'         : math.floor( queried_articles / articles_per_page ) + 1,
 					'search_terms' : search_terms,
-					'start'        : processed_articles,
+					'start'        : queried_articles,
 					'start_year'   : start_year
 				}
+
+				queried_articles += articles_per_page
 
 				def request_parser( matches ):
 					argument = matches[1]
@@ -470,4 +519,4 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attempts, debug ):
 
 	return response
 
-main( '"depression diagnosis" "artificial intelligence"', "test-eric.csv", debug = False, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017, selected_apis = 'eric' )
+main( '"depression diagnosis" "artificial intelligence"', "test-doaj.csv", debug = True, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017, selected_apis = 'doaj' )
