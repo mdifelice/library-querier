@@ -11,7 +11,7 @@ import time
 import urllib.parse as parse
 import urllib.request as request
 
-def main( search_terms, output, start_year = 1900, end_year = datetime.date.today().year, max_attempts = 3, ignore_failed_calls = False, use_cache = False, selected_apis = [], debug = False, api_keys = {}  ):
+def query( search_terms, output, start_year = 1900, end_year = datetime.date.today().year, max_attempts = 3, ignore_failed_calls = False, use_cache = False, selected_apis = [], debug = False, api_keys = {}  ):
 	articles = {}
 
 	if ( path.exists( output ) ):
@@ -518,5 +518,3 @@ def __request_url( url, use_cache, ignore_failed_calls, max_attempts, debug ):
 		raise Exception( 'Error calling URL ' + url )
 
 	return response
-
-main( '"depression diagnosis" "artificial intelligence"', "test-doaj.csv", debug = True, api_keys = { 'ieeexplore' : 'p2bvc6jvfj63v7w2m3rusmkr', 'scopus' : '004355a38181067856f7154a74d3ba3f' }, use_cache = True, start_year = 2017, selected_apis = 'doaj' )
