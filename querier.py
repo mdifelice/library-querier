@@ -6,6 +6,7 @@ import json
 import math
 import os.path as path
 import re
+import sys
 import tempfile
 import time
 import urllib.parse as parse
@@ -393,8 +394,7 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 									if updated_article:
 										updated_articles_map[ article_id ] = True
 
-			if total_articles is not None:
-				__finish_progress()
+			__finish_progress()
 
 	total_articles_by_provider = {}
 
@@ -457,7 +457,7 @@ def __start_progress( title, total ):
 def __print_progress( newline = False ):
 	global __progress_total, __progress_title, __progress
 
-	print( '%s [%.2f%%]' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0 ), end = '\r' if not newline else '\n' )
+	sys.stdout.write( '%s [%.2f%%]%s' % ( __progress_title, __progress * 100 / __progress_total if __progress_total else 0, '\r' if not newline else '\n' ) )
 
 def __update_progress():
 	global __progress
@@ -468,6 +468,9 @@ def __update_progress():
 
 def __finish_progress():
 	global __progress_total, __progress
+
+	if not __progress_total:
+		__progress_total = 1
 
 	__progress = __progress_total
 
