@@ -193,7 +193,7 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 # @link https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
 		'pubmed' : {
 			'parse_arguments' : {
-				'search_terms' : lambda value, arguments : re.sub( '"[^"]+"', '$0[All Fields]', value )
+				'search_terms' : lambda value, arguments : re.sub( '"[^"]+"', '\g<0>[All Fields]', value )
 			},
 			'parse_articles' : pubmed_parse_articles,
 			'parse_total'    : lambda response : response.get( 'esearchresult' ).get( 'count' ) if 'esearchresult' in response and 'count' in response.get( 'esearchresult' ) else 0,
