@@ -114,9 +114,16 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 		if search_results:
 			for entry in search_results.get( 'entry' ):
 				if 'error' not in entry:
+					authors = []
+
+					author = entry.get( 'dc:creator' )
+
+					if author:
+						authors.append( author )
+
 					article = {
 						'title'   : entry.get( 'dc:title' ),
-						'authors' : entry.get( 'dc:creators' ),
+						'authors' : authors,
 						'year'    : datetime.datetime.strptime( entry.get( 'prism:coverDate' ), '%Y-%m-%d' ).year,
 						'doi'     : __parse_doi( entry.get( 'prism:doi' ) )
 					}
@@ -401,7 +408,6 @@ def query( search_terms, output, start_year = 1900, end_year = datetime.date.tod
 		if ( len( articles ) ):
 			writer = csv.DictWriter( f, fieldnames = list( next( iter( articles.values() ) ).keys() ) )
 
-			print(list( next( iter( articles.values() ) ).keys() ) )
 			writer.writerows( articles.values() )
 
 			for id in articles:
